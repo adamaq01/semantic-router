@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -67,7 +68,10 @@ func init() {
 type Source struct {
 	ModelPrefix     string `yaml:"model_prefix" json:"model_prefix"`
 	QuotaSummaryURL string `yaml:"quota_summary_url" json:"quota_summary_url"`
-	AccessKey       string `yaml:"access_key" json:"access_key,omitempty"`
+	// AccessKeyEnv names the environment variable holding the quota-summary
+	// endpoint's bearer token, the same convention as a backend_ref's
+	// auth.api_key_env: config.yaml never carries the secret itself.
+	AccessKeyEnv string `yaml:"access_key_env" json:"access_key_env,omitempty"`
 }
 
 // Config is the "quota_aware" algorithm block's schema.
@@ -131,8 +135,10 @@ func fetchQuotaSummary(ctx context.Context, source Source, timeout time.Duration
 	if err != nil {
 		return byModel
 	}
-	if source.AccessKey != "" {
-		req.Header.Set("Authorization", "Bearer "+source.AccessKey)
+	if source.AccessKeyEnv != "" {
+		if key := os.Getenv(source.AccessKeyEnv); key != "" {
+			req.Header.Set("Authorization", "Bearer "+key)
+		}
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
