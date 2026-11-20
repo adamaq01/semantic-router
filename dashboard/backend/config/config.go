@@ -32,6 +32,11 @@ type Config struct {
 	RouterMetrics string
 	JaegerURL     string
 	EnvoyURL      string // Envoy proxy for chat completions
+	// EnvoyToken is the bearer credential the Playground's chat-completions proxy sends to
+	// EnvoyURL, for a listener configured with its own api_keys (the Router has no listener
+	// equivalent of the Router API's Dashboard-owned managed credential). Empty keeps the
+	// previous behavior: no Authorization header, for a listener with no api_keys configured.
+	EnvoyToken string
 
 	// ReadonlyMode is the explicit, process-wide hard deny. The writable flags
 	// describe the two independent persisted surfaces discovered by the
@@ -167,6 +172,7 @@ type parsedFlags struct {
 	routerMetrics          *string
 	jaegerURL              *string
 	envoyURL               *string
+	envoyToken             *string
 	readonlyMode           *bool
 	runtimeConfigWritable  *bool
 	recipeStoreWritable    *bool
@@ -194,6 +200,7 @@ func applyCoreConfig(cfg *Config, flags parsedFlags) {
 	cfg.RouterMetrics = *flags.routerMetrics
 	cfg.JaegerURL = *flags.jaegerURL
 	cfg.EnvoyURL = *flags.envoyURL
+	cfg.EnvoyToken = *flags.envoyToken
 	cfg.ReadonlyMode = *flags.readonlyMode
 	cfg.RuntimeConfigWritable = *flags.runtimeConfigWritable
 	cfg.RecipeStoreWritable = *flags.recipeStoreWritable
@@ -279,6 +286,10 @@ func bindCoreFlags() parsedFlags {
 		),
 		jaegerURL: flag.String("jaeger", env("TARGET_JAEGER_URL", ""), "Jaeger base URL"),
 		envoyURL:  flag.String("envoy", env("TARGET_ENVOY_URL", ""), "Envoy proxy URL for chat completions"),
+		envoyToken: flag.String(
+			"envoy-token", env("VLLM_SR_DASHBOARD_ENVOY_TOKEN", ""),
+			"Bearer credential sent to the Envoy chat-completions proxy, for a listener configured with its own api_keys",
+		),
 		readonlyMode: flag.Bool(
 			"readonly", env("DASHBOARD_READONLY", "false") == "true", "enable read-only mode (disable config editing)",
 		),

@@ -94,6 +94,13 @@ func configureEnvoyProxy(cfg *config.Config) *httputil.ReverseProxy {
 	envoyProxy.Director = func(request *http.Request) {
 		originalDirector(request)
 		routerauth.StripBrowserCredentials(request)
+		// A listener with its own api_keys rejects a browser's credential (just
+		// stripped above) and a bare forwarded request alike: it has no concept
+		// of a Dashboard-owned identity the way the Router API does. This sends
+		// the Dashboard's own configured listener credential instead, when set.
+		if cfg.EnvoyToken != "" {
+			request.Header.Set("Authorization", "Bearer "+cfg.EnvoyToken)
+		}
 		target, targetErr := resolveDynamicEnvoyTarget(cfg.EnvoyURL, cfg.AbsConfigPath)
 		if targetErr != nil {
 			request.URL.Scheme = ""

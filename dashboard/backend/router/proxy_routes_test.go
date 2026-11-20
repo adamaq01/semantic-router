@@ -226,6 +226,50 @@ func TestPlaygroundChatProxyPreservesIdentityAndStripsBrowserCredentials(t *test
 	}
 }
 
+// A listener configured with its own api_keys has no Dashboard-owned managed
+// credential the way the Router API does: cfg.EnvoyToken is the Dashboard's
+// own configured substitute, sent instead of (never alongside) any browser
+// credential.
+func TestPlaygroundChatProxySendsConfiguredEnvoyToken(t *testing.T) {
+	t.Setenv("VLLM_SR_PORT_OFFSET", "0")
+	received := make(chan http.Header, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		received <- r.Header.Clone()
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	target, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(t.TempDir(), "runtime.yaml")
+	runtimeConfig := "version: v0.5\nlisteners:\n  - name: public\n    address: 127.0.0.1\n    port: " + target.Port() + "\n"
+	if err := os.WriteFile(configPath, []byte(runtimeConfig), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{
+		EnvoyURL: server.URL, RouterAPIURL: server.URL, AbsConfigPath: configPath,
+		EnvoyToken: "configured-listener-token",
+	}
+	mux := http.NewServeMux()
+	registerRouterAPIProxy(mux, cfg, configureEnvoyProxy(cfg), nil, setupmode.New(configPath, false), routerProxyCredentialProvider{token: "management-only-token"})
+
+	body := `{"model":"vllm-sr/auto","messages":[{"role":"user","content":"hello"}]}`
+	request := httptest.NewRequest(http.MethodPost, "/api/router/v1/chat/completions", strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Authorization", "Bearer browser-token")
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("chat proxy status = %d: %s", response.Code, response.Body.String())
+	}
+	got := <-received
+	if authorization := got.Get("Authorization"); authorization != "Bearer configured-listener-token" {
+		t.Fatalf("Authorization = %q, want the configured Envoy token, not the browser's", authorization)
+	}
+}
+
 func TestInferenceStreamStopsWhenLiveAuthorizationIsRevoked(t *testing.T) {
 	for _, revocation := range []string{"permission", "session"} {
 		t.Run(revocation, func(t *testing.T) {
