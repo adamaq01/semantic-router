@@ -23,6 +23,41 @@ func TestPickBestPrefersUnmetered(t *testing.T) {
 	}
 }
 
+// Several unmetered providers configured side by side (e.g. a pay-per-token
+// API alongside one CLIProxyAPI simply hasn't reported usage for yet) must
+// not let modelRefs order silently starve every option but the first.
+func TestPickBestDistributesAcrossMultipleUnmeteredCandidates(t *testing.T) {
+	scored := []scoredCandidate{
+		{ref: candidate("free-a"), headroom: 100, available: true, unmetered: true},
+		{ref: candidate("free-b"), headroom: 100, available: true, unmetered: true},
+		{ref: candidate("free-c"), headroom: 100, available: true, unmetered: true},
+	}
+	seen := map[string]bool{}
+	for range 200 {
+		chosen, _ := pickBest(scored, 10)
+		if chosen == nil {
+			t.Fatal("expected a candidate")
+		}
+		seen[chosen.ref.Model] = true
+	}
+	if len(seen) != 3 {
+		t.Fatalf("expected all 3 unmetered candidates to be chosen at least once over 200 tries, got %v", seen)
+	}
+}
+
+func TestPickBestSkipsUnavailableUnmeteredCandidates(t *testing.T) {
+	scored := []scoredCandidate{
+		{ref: candidate("down"), headroom: 100, available: false, unmetered: true},
+		{ref: candidate("up"), headroom: 100, available: true, unmetered: true},
+	}
+	for range 20 {
+		chosen, _ := pickBest(scored, 10)
+		if chosen == nil || chosen.ref.Model != "up" {
+			t.Fatalf("expected the only available unmetered candidate, got %+v", chosen)
+		}
+	}
+}
+
 func TestPickBestRanksByHeadroomAboveMinimum(t *testing.T) {
 	scored := []scoredCandidate{
 		{ref: candidate("low"), headroom: 5, available: true},

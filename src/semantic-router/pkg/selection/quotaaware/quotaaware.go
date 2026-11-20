@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/rand/v2"
 	"net/http"
 	"os"
 	"sort"
@@ -297,16 +298,36 @@ func (c *Config) Select(ctx context.Context, selCtx *selection.SelectionContext)
 	}, nil
 }
 
-// pickBest prefers a candidate no source maps at all (order given), since it
-// has no quota ceiling to protect; among the rest (including one CLIProxyAPI
-// simply hasn't reported usage for yet) it picks the most headroom above
-// minHeadroom, falling back to the single candidate with the most headroom
-// when every one of them is below minHeadroom.
-func pickBest(scored []scoredCandidate, minHeadroom float64) (*scoredCandidate, string) {
-	for i := range scored {
-		if scored[i].unmetered && scored[i].available {
-			return &scored[i], fmt.Sprintf("%s has no quota ceiling", scored[i].ref.Model)
+// unmeteredChoice picks uniformly at random among the candidates no source
+// maps at all: each has no quota ceiling to protect, so there is nothing to
+// rank them by. Candidate order must not decide this: with several
+// unmetered providers configured side by side (a model reached through a
+// pay-per-token API alongside one CLIProxyAPI simply hasn't reported usage
+// for yet), always returning the first in modelRefs order would silently
+// starve every other one of all traffic.
+func unmeteredChoice(scored []scoredCandidate) (*scoredCandidate, string) {
+	var unmetered []scoredCandidate
+	for _, candidate := range scored {
+		if candidate.unmetered && candidate.available {
+			unmetered = append(unmetered, candidate)
 		}
+	}
+	if len(unmetered) == 0 {
+		return nil, ""
+	}
+	chosen := unmetered[rand.IntN(len(unmetered))]
+	return &chosen, fmt.Sprintf("%s has no quota ceiling", chosen.ref.Model)
+}
+
+// pickBest prefers a candidate no source maps at all (order given is not a
+// ranking: see unmeteredChoice), since it has no quota ceiling to protect;
+// among the rest (including one CLIProxyAPI simply hasn't reported usage for
+// yet) it picks the most headroom above minHeadroom, falling back to the
+// single candidate with the most headroom when every one of them is below
+// minHeadroom.
+func pickBest(scored []scoredCandidate, minHeadroom float64) (*scoredCandidate, string) {
+	if chosen, reasoning := unmeteredChoice(scored); chosen != nil {
+		return chosen, reasoning
 	}
 
 	available := make([]scoredCandidate, 0, len(scored))
